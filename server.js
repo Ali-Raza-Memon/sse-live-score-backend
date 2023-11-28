@@ -1,142 +1,106 @@
-const express = require('express');
-const http = require('http');
-const WebSocket = require('ws');
+// server.js
+const express = require("express");
+const http = require("http");
+const { EventEmitter } = require("events");
+const cors = require("cors");
 
 const app = express();
+app.use(cors());
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+const eventEmitter = new EventEmitter();
 
-// Map to store connected clients
-const clients = new Map();
-var count = 1;
-wss.on('connection', function connection(ws) {
-    console.log('A new client Connected!');
-    ws.send(JSON.stringify({ type: 'intial', message: 'Welcome to live Score App' }));
+app.use(express.json());
 
-    // Generate a unique identifier for the client
-    const clientId = Math.random().toString(36).substring(7);
-    clients.set(clientId, ws);
+// SSE endpoint
+app.get("/sse", (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
 
-    ws.on('message', function incoming(message) {
-        console.log('received from', clientId, ':', message);
+  // Event listener for updates
+  const listener = (data) => {
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
 
-                   
-            console.log("Hello I am from String. 2");
-            // Handle string message
-            // console.log('Received string message 111111111111111:', message);
+  // Attach the event listener
+  eventEmitter.on("update", listener);
 
-            const parsedMessage = JSON.parse(message);
-            console.log('Received string message 111111111111111:', parsedMessage);
-
-
-            if(parsedMessage.type==='update-score'){
-                console.log("UPPPPPPPPPPPPPPPPdate is called");
-                
-            // Broadcast the string message to all other clients
-                clients.forEach(function each(client) {
-                    if (client.readyState === WebSocket.OPEN) {
-                        // client.send(`${clientId}: ${message}`);
-                        
-                        client.send(JSON.stringify({ type: 'update-score', team_wise_score: ` ${message} ` }));
-
-                    }
-                });
-            }
-            else if(parsedMessage.type==='create-teams'){
-
-                const { team1, team2 } = parsedMessage;
-                console.log('Received team creation message:', team1, team2);
-                    
-                // Broadcast the team creation message to all clients
-                clients.forEach(function each(client) {
-                    console.log("team-01 :"+team1 + " ......team-02 :"+team2);
-                    if (client.readyState === WebSocket.OPEN) {
-                        client.send(JSON.stringify({ type: 'create-teams', message: `${team1} vs ${team2}` }));
-                    }
-                });
-                        
-            }
-            else{
-                console.log(parsedMessage.type);
-            }
-
-            // if (parsedMessage){
-            //     console.log("I am true!!!!!!!!!!!!")
-            //     switch (parsedMessage.type){
-            //         case 'create-teams':
-            //             // Handle team creation message
-            //             const { team1, team2 } = parsedMessage;
-            //             console.log('Received team creation message:', team1, team2);
-            //             // Handle the team creation logic
-            //             break;
-
-            //         case 'update-scores':
-            //                 // Handle score update message
-            //             const { scoreData } = parsedMessage;
-            //             console.log('Received score update message:', scoreData);
-            //                 // Handle the score update logic
-            //             break;
-
-            //         default:
-            //                 console.log('Unknown message type:', parsedMessage.type);
-            //     }
-            // }else {
-            //     console.error('Received invalid JSON message:', message);
-            // }
+  // Cleanup on client disconnect
+  req.on("close", () => {
+    eventEmitter.removeListener("update", listener);
+  });
+});
 
 
-
-           
-    
-            // Handle JSON message
-            // try {
-            //     count=0;
-            //     const parsedMessage = JSON.parse(message);
-
-            //     // Check if the parsed message has the required properties
-            //     if (parsedMessage && typeof parsedMessage.type === 'string') {
-            //         console.log(parsedMessage.type);
-            //         const parsedMessage = JSON.parse(message);
-
-            //         if (parsedMessage.type === 'create-teams') {
-            //             const { team1, team2 } = parsedMessage;
-            //             console.log('Received team creation message:', team1, team2);
-                
-            //             // Broadcast the team creation message to all clients
-            //             clients.forEach(function each(client) {
-            //                 if (client.readyState === WebSocket.OPEN) {
-            //                     client.send(`New Teams Created: ${team1} vs ${team2}`);
-            //                 }
-            //             });
-            //         } else {
-            //             // Handle other types of JSON messages
-            //             console.log('Received from', clientId, ':', message);
-
-            //             // Broadcast the JSON message to all other clients
-            //             clients.forEach(function each(client, id) {
-            //                 if (id !== clientId && client.readyState === WebSocket.OPEN) {
-            //                     client.send(`${clientId}: ${message}`);
-            //                 }
-            //             });
-            //         }
-            //     } else {
-            //         console.error('Received invalid JSON message:', message);
-            //     }
-            // } catch (error) {
-            //     console.error('Error parsing message as JSON:', error);
-            // }
-        
-        
-    });
-
-    ws.on('close', function () {
-        console.log('Client disconnected:', clientId);
-        clients.delete(clientId);
-    });
+// Admin API to send messages and teams
+app.post("/send-message", express.json(), (req, res) => {
+  const message = req.body.message;
+  const type = req.body.type;
+  const team = req.body.team;
+  console.log("message",req.body.message);
+  if (message) {
+    // Emit the message event
+    console.log("type is ",type);
+    eventEmitter.emit("message", { message });
+    res.status(200).json({ success: true });
+  }else {
+    res.status(400).json({ error: "Invalid data" });
+  }
 });
 
 
 
-app.get('/', (req, res) => res.send('Hello World!'));
+app.post("/send-teams", express.json(), (req,res)=>{
+  const team = req.body.team;
+  const type = req.body.type;
+  if(team){
+    console.log("team is ",team);
+    console.log("type is ",type)
+    eventEmitter.emit("team",{ team });
+    res.status(200).json({success:true});
+  }else{
+    res.status(400).json({error : "Invalid data"})
+  }
+});
 
-server.listen(5000, () => console.log('Listening on port 5000'));
+// SSE endpoint for broadcasting messages and teams to clients
+app.get("/broadcast-sse", (req, res) => {
+  // Set up SSE for broadcasting messages and teams to clients
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+
+  // Event listener for messages and teams
+  const listener = (data) => {
+    const type = data.type;
+
+    if (type === "message") {
+      // Handle message
+      console.log("Received message:", data.message);
+    } else if (type === "team") {
+      // Handle team
+      console.log("Received team:", data.team);
+    }
+    
+    // You can customize the handling of other types if needed
+
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  // Attach the event listener
+  eventEmitter.on("message", listener);
+  eventEmitter.on("team", listener);
+
+  // Cleanup on client disconnect
+  req.on("close", () => {
+    eventEmitter.removeListener("message", listener);
+    eventEmitter.removeListener("team", listener);
+  });
+});
+
+
+
+const PORT = process.env.PORT || 5000;
+server.listen(PORT, () => {
+  console.log(`Server listening on port ${PORT}`);
+});
